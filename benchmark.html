@@ -1,0 +1,639 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Symmetric Cipher Benchmark (with WASM)</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monospace;
+      max-width: 950px;
+      margin: 0 auto;
+      padding: 20px;
+      background: #1a1a2e;
+      color: #eee;
+    }
+    h1 { color: #00d4ff; margin-bottom: 5px; }
+    .subtitle { color: #888; margin-bottom: 20px; }
+    .info-box {
+      background: #16213e;
+      padding: 15px;
+      border-radius: 8px;
+      margin-bottom: 20px;
+      border-left: 4px solid #00d4ff;
+    }
+    .info-box code { color: #00d4ff; }
+    .controls {
+      display: flex;
+      gap: 15px;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    label { color: #aaa; }
+    select, input {
+      padding: 8px 12px;
+      border-radius: 4px;
+      border: 1px solid #333;
+      background: #0f0f23;
+      color: #eee;
+      font-size: 14px;
+    }
+    button {
+      padding: 12px 24px;
+      border-radius: 6px;
+      border: none;
+      background: #00d4ff;
+      color: #000;
+      font-weight: bold;
+      font-size: 16px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    button:hover { background: #00a8cc; }
+    button:disabled { background: #444; color: #888; cursor: not-allowed; }
+    .results { margin-top: 20px; }
+    .result-section {
+      background: #16213e;
+      padding: 15px;
+      border-radius: 8px;
+      margin-bottom: 15px;
+    }
+    .result-section h3 {
+      margin: 0 0 10px 0;
+      color: #00d4ff;
+      font-size: 14px;
+    }
+    .algo-row {
+      display: grid;
+      grid-template-columns: 200px 1fr 1fr;
+      gap: 10px;
+      padding: 8px 0;
+      border-bottom: 1px solid #333;
+    }
+    .algo-row:last-child { border-bottom: none; }
+    .algo-name { font-weight: bold; font-size: 13px; }
+    .algo-name.blowfish { color: #ff6b6b; }
+    .algo-name.aes { color: #4ecdc4; }
+    .algo-name.chacha { color: #ffe66d; }
+    .algo-name.wasm { color: #a78bfa; }
+    .metric { font-size: 13px; }
+    .metric .value { font-weight: bold; font-size: 15px; }
+    .metric .unit { color: #888; }
+    .bar-container {
+      height: 18px;
+      background: #0f0f23;
+      border-radius: 4px;
+      overflow: hidden;
+      margin-top: 4px;
+    }
+    .bar {
+      height: 100%;
+      border-radius: 4px;
+      transition: width 0.3s;
+    }
+    .bar.blowfish { background: #ff6b6b; }
+    .bar.aes { background: #4ecdc4; }
+    .bar.chacha { background: #ffe66d; }
+    .bar.wasm { background: #a78bfa; }
+    .summary {
+      background: #0f3460;
+      padding: 20px;
+      border-radius: 8px;
+      margin-top: 20px;
+    }
+    .summary h2 { margin-top: 0; color: #00d4ff; }
+    .winner {
+      font-size: 18px;
+      padding: 10px;
+      background: #16213e;
+      border-radius: 6px;
+      margin: 10px 0;
+    }
+    .winner strong { color: #4ecdc4; }
+    .status {
+      padding: 10px;
+      border-radius: 6px;
+      margin-bottom: 15px;
+    }
+    .status.running { background: #1e3a5f; color: #00d4ff; }
+    .status.done { background: #1e5f3a; color: #4ecdc4; }
+    .status.error { background: #5f1e1e; color: #ff6b6b; }
+    .note {
+      font-size: 12px;
+      color: #888;
+      margin-top: 15px;
+      padding: 10px;
+      background: #0f0f23;
+      border-radius: 4px;
+    }
+    .loading { display: inline-block; animation: spin 1s linear infinite; }
+    @keyframes spin { 100% { transform: rotate(360deg); } }
+    .tag {
+      display: inline-block;
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-size: 10px;
+      margin-left: 5px;
+      vertical-align: middle;
+    }
+    .tag.native { background: #4ecdc4; color: #000; }
+    .tag.wasm { background: #a78bfa; color: #000; }
+    .tag.js { background: #888; color: #000; }
+  </style>
+</head>
+<body>
+  <h1>Symmetric Cipher Benchmark</h1>
+  <p class="subtitle">Compare Native Web Crypto, WASM (libsodium), and Pure JS implementations</p>
+
+  <div class="info-box">
+    <strong>Platform:</strong> <code id="platform"></code><br>
+    <strong>User Agent:</strong> <code id="userAgent"></code><br>
+    <strong>libsodium.js:</strong> <code id="sodiumStatus">Loading...</code>
+  </div>
+
+  <div class="controls">
+    <div>
+      <label for="dataSize">Data Size:</label>
+      <select id="dataSize">
+        <option value="1024">1 KB</option>
+        <option value="16384">16 KB</option>
+        <option value="65536" selected>64 KB</option>
+        <option value="262144">256 KB</option>
+        <option value="1048576">1 MB</option>
+      </select>
+    </div>
+    <div>
+      <label for="iterations">Iterations:</label>
+      <input type="number" id="iterations" value="50" min="5" max="1000" style="width: 80px;">
+    </div>
+    <button id="runBtn" onclick="runBenchmark()" disabled>Loading libsodium...</button>
+    <button id="vectorBtn" onclick="runChaChaVectorTest()" disabled>Vector test (ChaCha)</button>
+  </div>
+
+  <div id="status"></div>
+  <div id="results" class="results"></div>
+  <pre id="vectorOut" class="note" style="white-space: pre-wrap; word-break: break-word; display:none;"></pre>
+
+  <script type="module">
+    // Import Noble ciphers (ChaCha20-Poly1305 with 12-byte nonce, Erlang compatible)
+    let nobleChaCha = null;
+    let nobleReady = false;
+    let sodiumReady = false;
+
+    try {
+      const { chacha20poly1305 } = await import('https://esm.sh/@noble/ciphers@1.0.0/chacha.js');
+      nobleChaCha = chacha20poly1305;
+      nobleReady = true;
+      window.nobleChaCha = nobleChaCha;
+      window.nobleReady = true;
+      document.getElementById('sodiumStatus').textContent = 'Noble ready; libsodium WASM loading...';
+      document.getElementById('sodiumStatus').style.color = '#4ecdc4';
+    } catch (e) {
+      console.error('Noble load error:', e);
+      document.getElementById('sodiumStatus').textContent = 'Noble not loaded: ' + e.message;
+      document.getElementById('sodiumStatus').style.color = '#ff6b6b';
+    }
+
+    try {
+      const sodiumMod = await import('https://esm.sh/libsodium-wrappers-sumo');
+      const sodium = sodiumMod.default || sodiumMod;
+      await sodium.ready;
+      window.sodium = sodium;
+      window.sodiumReady = true;
+      sodiumReady = true;
+      document.getElementById('sodiumStatus').textContent = nobleReady
+        ? 'Noble ready; libsodium WASM ready'
+        : 'libsodium WASM ready';
+      document.getElementById('sodiumStatus').style.color = '#4ecdc4';
+    } catch (e) {
+      console.error('libsodium load error:', e);
+      window.sodiumReady = false;
+      document.getElementById('sodiumStatus').textContent = (nobleReady ? 'Noble ready; ' : '') + 'libsodium WASM not loaded: ' + e.message;
+      document.getElementById('sodiumStatus').style.color = nobleReady ? '#ffe66d' : '#ff6b6b';
+    }
+
+    document.getElementById('runBtn').textContent = 'Run Benchmark';
+    document.getElementById('runBtn').disabled = false;
+    document.getElementById('vectorBtn').disabled = !(window.nobleReady && window.nobleChaCha);
+  </script>
+
+  <script>
+
+    // ========== Utility Functions ==========
+    function randomBytes(n) {
+      const arr = new Uint8Array(n);
+      const chunkSize = 65536;
+      for (let i = 0; i < n; i += chunkSize) {
+        const chunk = Math.min(chunkSize, n - i);
+        crypto.getRandomValues(arr.subarray(i, i + chunk));
+      }
+      return arr;
+    }
+
+    // ========== Blowfish CFB Implementation (Pure JS) ==========
+    class BlowfishCFB {
+      constructor(key) {
+        this.key = key;
+        this.pbox = new Uint32Array(18);
+        this.sbox = [
+          new Uint32Array(256), new Uint32Array(256),
+          new Uint32Array(256), new Uint32Array(256)
+        ];
+        this.init();
+      }
+
+      init() {
+        const P_INIT = [
+          0x243f6a88, 0x85a308d3, 0x13198a2e, 0x03707344,
+          0xa4093822, 0x299f31d0, 0x082efa98, 0xec4e6c89,
+          0x452821e6, 0x38d01377, 0xbe5466cf, 0x34e90c6c,
+          0xc0ac29b7, 0xc97c50dd, 0x3f84d5b5, 0xb5470917,
+          0x9216d5d9, 0x8979fb1b
+        ];
+        const S_INIT = this.generateSBoxes();
+        for (let i = 0; i < 18; i++) this.pbox[i] = P_INIT[i];
+        for (let i = 0; i < 4; i++) {
+          for (let j = 0; j < 256; j++) this.sbox[i][j] = S_INIT[i * 256 + j];
+        }
+        let keyIndex = 0;
+        for (let i = 0; i < 18; i++) {
+          let data = 0;
+          for (let j = 0; j < 4; j++) {
+            data = (data << 8) | this.key[keyIndex % this.key.length];
+            keyIndex++;
+          }
+          this.pbox[i] ^= data;
+        }
+        let L = 0, R = 0;
+        for (let i = 0; i < 18; i += 2) {
+          [L, R] = this.encryptBlock(L, R);
+          this.pbox[i] = L;
+          this.pbox[i + 1] = R;
+        }
+        for (let i = 0; i < 4; i++) {
+          for (let j = 0; j < 256; j += 2) {
+            [L, R] = this.encryptBlock(L, R);
+            this.sbox[i][j] = L;
+            this.sbox[i][j + 1] = R;
+          }
+        }
+      }
+
+      generateSBoxes() {
+        const s = new Uint32Array(1024);
+        let val = 0xd1310ba6;
+        for (let i = 0; i < 1024; i++) {
+          s[i] = val;
+          val = (val * 1103515245 + 12345) >>> 0;
+        }
+        return s;
+      }
+
+      F(x) {
+        const a = (x >>> 24) & 0xff, b = (x >>> 16) & 0xff;
+        const c = (x >>> 8) & 0xff, d = x & 0xff;
+        let y = (this.sbox[0][a] + this.sbox[1][b]) >>> 0;
+        y = y ^ this.sbox[2][c];
+        return (y + this.sbox[3][d]) >>> 0;
+      }
+
+      encryptBlock(L, R) {
+        for (let i = 0; i < 16; i++) {
+          L ^= this.pbox[i];
+          R ^= this.F(L);
+          [L, R] = [R, L];
+        }
+        [L, R] = [R, L];
+        R ^= this.pbox[16];
+        L ^= this.pbox[17];
+        return [L, R];
+      }
+
+      encrypt(plaintext, iv) {
+        const output = new Uint8Array(plaintext.length);
+        let feedback = new Uint8Array(iv);
+        for (let i = 0; i < plaintext.length; i += 8) {
+          let L = (feedback[0] << 24) | (feedback[1] << 16) | (feedback[2] << 8) | feedback[3];
+          let R = (feedback[4] << 24) | (feedback[5] << 16) | (feedback[6] << 8) | feedback[7];
+          [L, R] = this.encryptBlock(L, R);
+          const blockLen = Math.min(8, plaintext.length - i);
+          const encrypted = new Uint8Array([
+            (L >>> 24) & 0xff, (L >>> 16) & 0xff, (L >>> 8) & 0xff, L & 0xff,
+            (R >>> 24) & 0xff, (R >>> 16) & 0xff, (R >>> 8) & 0xff, R & 0xff
+          ]);
+          for (let j = 0; j < blockLen; j++) output[i + j] = plaintext[i + j] ^ encrypted[j];
+          feedback = output.slice(i, i + 8);
+          if (feedback.length < 8) { const pad = new Uint8Array(8); pad.set(feedback); feedback = pad; }
+        }
+        return output;
+      }
+    }
+
+    // ========== ChaCha20-Poly1305 (Pure JS) ==========
+    class ChaCha20Poly1305JS {
+      constructor(key, nonce) {
+        this.key = key;
+        this.nonce = nonce;
+      }
+      rotl(a, b) { return ((a << b) | (a >>> (32 - b))) >>> 0; }
+      quarterRound(s, a, b, c, d) {
+        s[a] = (s[a] + s[b]) >>> 0; s[d] ^= s[a]; s[d] = this.rotl(s[d], 16);
+        s[c] = (s[c] + s[d]) >>> 0; s[b] ^= s[c]; s[b] = this.rotl(s[b], 12);
+        s[a] = (s[a] + s[b]) >>> 0; s[d] ^= s[a]; s[d] = this.rotl(s[d], 8);
+        s[c] = (s[c] + s[d]) >>> 0; s[b] ^= s[c]; s[b] = this.rotl(s[b], 7);
+      }
+      chacha20Block(counter) {
+        const state = new Uint32Array([
+          0x61707865, 0x3320646e, 0x79622d32, 0x6b206574,
+          ...new Uint32Array(this.key.buffer, this.key.byteOffset, 8),
+          counter,
+          ...new Uint32Array(this.nonce.buffer, this.nonce.byteOffset, 3)
+        ]);
+        const working = new Uint32Array(state);
+        for (let i = 0; i < 10; i++) {
+          this.quarterRound(working, 0, 4, 8, 12);
+          this.quarterRound(working, 1, 5, 9, 13);
+          this.quarterRound(working, 2, 6, 10, 14);
+          this.quarterRound(working, 3, 7, 11, 15);
+          this.quarterRound(working, 0, 5, 10, 15);
+          this.quarterRound(working, 1, 6, 11, 12);
+          this.quarterRound(working, 2, 7, 8, 13);
+          this.quarterRound(working, 3, 4, 9, 14);
+        }
+        const output = new Uint8Array(64);
+        const outView = new DataView(output.buffer);
+        for (let i = 0; i < 16; i++) outView.setUint32(i * 4, (working[i] + state[i]) >>> 0, true);
+        return output;
+      }
+      encrypt(plaintext) {
+        const output = new Uint8Array(plaintext.length + 16); // +16 for fake tag
+        let counter = 1;
+        for (let i = 0; i < plaintext.length; i += 64) {
+          const keystream = this.chacha20Block(counter++);
+          const blockLen = Math.min(64, plaintext.length - i);
+          for (let j = 0; j < blockLen; j++) output[i + j] = plaintext[i + j] ^ keystream[j];
+        }
+        return output;
+      }
+      decrypt(ciphertext) {
+        return this.encrypt(ciphertext.slice(0, -16));
+      }
+    }
+
+    // ========== Display platform info ==========
+    document.getElementById('platform').textContent = navigator.platform || 'Unknown';
+    document.getElementById('userAgent').textContent = navigator.userAgent.substring(0, 70) + '...';
+
+    // ========== Benchmark Functions ==========
+    function benchmarkSync(name, encFn, decFn, iterations) {
+      // Warmup
+      encFn(); decFn();
+
+      const encStart = performance.now();
+      let result;
+      for (let i = 0; i < iterations; i++) result = encFn();
+      const encTime = performance.now() - encStart;
+
+      const decStart = performance.now();
+      for (let i = 0; i < iterations; i++) decFn();
+      const decTime = performance.now() - decStart;
+
+      return { encTime, decTime, iterations };
+    }
+
+    async function benchmarkAsync(name, encFn, decFn, iterations) {
+      // Warmup
+      await encFn(); await decFn();
+
+      const encStart = performance.now();
+      for (let i = 0; i < iterations; i++) await encFn();
+      const encTime = performance.now() - encStart;
+
+      const decStart = performance.now();
+      for (let i = 0; i < iterations; i++) await decFn();
+      const decTime = performance.now() - decStart;
+
+      return { encTime, decTime, iterations };
+    }
+
+    function formatThroughput(bytes, timeMs) {
+      if (timeMs === 0) return '∞';
+      const mbPerSec = (bytes / timeMs) * 1000 / (1024 * 1024);
+      return mbPerSec.toFixed(1);
+    }
+
+    function formatSize(bytes) {
+      if (bytes >= 1048576) return (bytes / 1048576) + ' MB';
+      if (bytes >= 1024) return (bytes / 1024) + ' KB';
+      return bytes + ' B';
+    }
+
+    function toHex(bytes) {
+      let s = '';
+      for (let i = 0; i < bytes.length; i++) s += bytes[i].toString(16).padStart(2, '0');
+      return s;
+    }
+
+    async function runChaChaVectorTest() {
+      const out = document.getElementById('vectorOut');
+      out.style.display = 'block';
+
+      if (!(window.nobleReady && window.nobleChaCha)) {
+        out.textContent = 'Noble not loaded.';
+        return;
+      }
+
+      const key = new Uint8Array(32);
+      for (let i = 0; i < key.length; i++) key[i] = i;
+      const nonce = new Uint8Array(12);
+      for (let i = 0; i < nonce.length; i++) nonce[i] = i;
+      const aad = new Uint8Array([1, 2, 3, 4]);
+      const pt = new TextEncoder().encode('Hello, PQ!');
+
+      const cipher = window.nobleChaCha(key, nonce, aad);
+      const enc = cipher.encrypt(pt);
+
+      const ct = enc.slice(0, enc.length - 16);
+      const tag = enc.slice(enc.length - 16);
+
+      out.textContent = [
+        'ChaCha20-Poly1305 Vector Test (compare with Erlang :crypto)',
+        'key=' + toHex(key),
+        'nonce=' + toHex(nonce),
+        'aad=' + toHex(aad),
+        'pt=' + toHex(pt),
+        'ct=' + toHex(ct),
+        'tag=' + toHex(tag),
+        'ct_tag=' + toHex(enc)
+      ].join('\n');
+    }
+
+    async function runBenchmark() {
+      const dataSize = parseInt(document.getElementById('dataSize').value);
+      const iterations = parseInt(document.getElementById('iterations').value);
+      const btn = document.getElementById('runBtn');
+      const statusDiv = document.getElementById('status');
+      const resultsDiv = document.getElementById('results');
+
+      btn.disabled = true;
+      const results = [];
+      const totalBytes = dataSize * iterations;
+
+      try {
+        const data = randomBytes(dataSize);
+
+        // 1. Blowfish CFB (Pure JS)
+        statusDiv.innerHTML = '<div class="status running"><span class="loading">&#x21bb;</span> Testing Blowfish CFB (JS)...</div>';
+        await new Promise(r => setTimeout(r, 10));
+        {
+          const key = randomBytes(16);
+          const iv = randomBytes(8);
+          const bf = new BlowfishCFB(key);
+          let ct;
+          const res = benchmarkSync('Blowfish', () => ct = bf.encrypt(data, iv), () => bf.encrypt(ct, iv), iterations);
+          results.push({ name: 'Blowfish CFB', tag: 'JS', class: 'blowfish', ...res });
+        }
+
+        // 2. AES-256-GCM (Web Crypto - Native)
+        // Requires HTTPS or localhost (secure context)
+        if (crypto.subtle) {
+          statusDiv.innerHTML = '<div class="status running"><span class="loading">&#x21bb;</span> Testing AES-256-GCM (Native)...</div>';
+          await new Promise(r => setTimeout(r, 10));
+          try {
+            const key = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt']);
+            const iv = randomBytes(12);
+            let ct;
+            const res = await benchmarkAsync('AES-GCM',
+              async () => ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, data),
+              async () => await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, ct),
+              iterations
+            );
+            results.push({ name: 'AES-256-GCM', tag: 'Native', class: 'aes', ...res });
+          } catch (e) {
+            console.error('AES-GCM error:', e);
+            results.push({ name: 'AES-256-GCM', tag: 'N/A', class: 'aes', encTime: 0, decTime: 0, iterations: 0 });
+          }
+        } else {
+          results.push({ name: 'AES-256-GCM (needs HTTPS)', tag: 'N/A', class: 'aes', encTime: 0, decTime: 0, iterations: 0 });
+        }
+
+        // 3. ChaCha20-Poly1305 (Pure JS)
+        statusDiv.innerHTML = '<div class="status running"><span class="loading">&#x21bb;</span> Testing ChaCha20-Poly1305 (JS)...</div>';
+        await new Promise(r => setTimeout(r, 10));
+        {
+          const key = randomBytes(32);
+          const nonce = randomBytes(12);
+          const cipher = new ChaCha20Poly1305JS(key, nonce);
+          let ct;
+          const res = benchmarkSync('ChaCha20-JS', () => ct = cipher.encrypt(data), () => cipher.decrypt(ct), iterations);
+          results.push({ name: 'ChaCha20-Poly1305', tag: 'JS', class: 'chacha', ...res });
+        }
+
+        // 4. ChaCha20-Poly1305 (Noble - optimized JS, Erlang compatible)
+        if (window.nobleReady && window.nobleChaCha) {
+          statusDiv.innerHTML = '<div class="status running"><span class="loading">&#x21bb;</span> Testing ChaCha20-Poly1305 (Noble)...</div>';
+          await new Promise(r => setTimeout(r, 10));
+          {
+            const key = randomBytes(32);
+            const nonce = randomBytes(12);  // 12-byte nonce, Erlang compatible!
+            let ct;
+            const res = benchmarkSync('ChaCha20-Noble',
+              () => {
+                const cipher = window.nobleChaCha(key, nonce);
+                ct = cipher.encrypt(data);
+                return ct;
+              },
+              () => {
+                const cipher = window.nobleChaCha(key, nonce);
+                return cipher.decrypt(ct);
+              },
+              iterations
+            );
+            results.push({ name: 'ChaCha20-Poly1305', tag: 'Noble', class: 'wasm', ...res });
+          }
+        }
+
+        // 5. ChaCha20-Poly1305 (libsodium WASM - IETF, 12-byte nonce, Erlang compatible)
+        if (window.sodiumReady && window.sodium) {
+          statusDiv.innerHTML = '<div class="status running"><span class="loading">&#x21bb;</span> Testing ChaCha20-Poly1305 (libsodium WASM)...</div>';
+          await new Promise(r => setTimeout(r, 10));
+          {
+            const key = randomBytes(32);
+            const nonce = randomBytes(12);
+            const aad = new Uint8Array(0);
+            let ct;
+            const res = benchmarkSync('ChaCha20-libsodium',
+              () => {
+                ct = window.sodium.crypto_aead_chacha20poly1305_ietf_encrypt(data, aad, null, nonce, key);
+                return ct;
+              },
+              () => {
+                return window.sodium.crypto_aead_chacha20poly1305_ietf_decrypt(null, ct, aad, nonce, key);
+              },
+              iterations
+            );
+            results.push({ name: 'ChaCha20-Poly1305', tag: 'WASM', class: 'wasm', ...res });
+          }
+        }
+
+        // Calculate throughputs and find max
+        results.forEach(r => {
+          r.encThroughput = parseFloat(formatThroughput(totalBytes, r.encTime));
+          r.decThroughput = parseFloat(formatThroughput(totalBytes, r.decTime));
+        });
+        const maxEnc = Math.max(...results.map(r => r.encThroughput));
+        const maxDec = Math.max(...results.map(r => r.decThroughput));
+        const encWinner = results.reduce((a, b) => a.encThroughput > b.encThroughput ? a : b);
+        const decWinner = results.reduce((a, b) => a.decThroughput > b.decThroughput ? a : b);
+
+        statusDiv.innerHTML = '<div class="status done">&#x2713; Benchmark complete!</div>';
+
+        resultsDiv.innerHTML = `
+          <div class="result-section">
+            <h3>Data Size: ${formatSize(dataSize)} | Iterations: ${iterations} | Total: ${formatSize(totalBytes)}</h3>
+            ${results.map(r => `
+              <div class="algo-row">
+                <div class="algo-name ${r.class}">${r.name} <span class="tag ${r.tag.toLowerCase()}">${r.tag}</span></div>
+                <div class="metric">
+                  Enc: <span class="value">${r.encThroughput}</span> <span class="unit">MB/s</span>
+                  <span class="unit">(${(r.encTime / iterations).toFixed(2)} ms)</span>
+                  <div class="bar-container">
+                    <div class="bar ${r.class}" style="width: ${(r.encThroughput / maxEnc * 100)}%"></div>
+                  </div>
+                </div>
+                <div class="metric">
+                  Dec: <span class="value">${r.decThroughput}</span> <span class="unit">MB/s</span>
+                  <span class="unit">(${(r.decTime / iterations).toFixed(2)} ms)</span>
+                  <div class="bar-container">
+                    <div class="bar ${r.class}" style="width: ${(r.decThroughput / maxDec * 100)}%"></div>
+                  </div>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+
+          <div class="summary">
+            <h2>Results</h2>
+            <div class="winner">Fastest Encryption: <strong>${encWinner.name}</strong> (${encWinner.encThroughput} MB/s) <span class="tag ${encWinner.tag.toLowerCase()}">${encWinner.tag}</span></div>
+            <div class="winner">Fastest Decryption: <strong>${decWinner.name}</strong> (${decWinner.decThroughput} MB/s) <span class="tag ${decWinner.tag.toLowerCase()}">${decWinner.tag}</span></div>
+            <div class="note">
+              <strong>Implementation Types:</strong><br>
+              - <span class="tag native">Native</span> Web Crypto API - browser's built-in, hardware accelerated<br>
+              - <span class="tag wasm">Noble</span> @noble/ciphers - optimized JS, 12-byte nonce (Erlang compatible)<br>
+              - <span class="tag js">JS</span> Pure JavaScript - basic implementation for comparison<br><br>
+              <strong>Recommendation:</strong> Use Native AES-GCM if fastest, otherwise Noble ChaCha20.
+            </div>
+          </div>
+        `;
+      } catch (err) {
+        statusDiv.innerHTML = `<div class="status error">Error: ${err.message}</div>`;
+        console.error(err);
+      }
+
+      btn.disabled = false;
+    }
+  </script>
+</body>
+</html>

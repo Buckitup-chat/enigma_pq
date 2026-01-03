@@ -1,0 +1,4 @@
+%{
+  "curvy": {:hex, :curvy, "0.3.1", "2645a11452743a37de2393da4d2e60700632498b166413b4f73bc34c57a911e1", [:mix], [], "hexpm", "82df293452f7b751becabc29e8aad0f7d88ffdcd790ac7a2ea16ea1544681d8a"},
+  "keyx": {:hex, :keyx, "0.4.1", "fa6d332a573e6f6d9e2db94dadfba3b15806a2901602f661f20bd914645a7945", [:mix], [], "hexpm", "a5c6eee2b55619f750afc123daf9624e2c57dc17075272b75b514f83a1fa6be0"},
+}
