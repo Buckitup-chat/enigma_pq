@@ -35,9 +35,13 @@ defmodule EnigmaPq.Crypt do
 
   Returns {kem_ciphertext, shared_secret}.
   """
-  def compute_secret(_private, public) when is_binary(public) do
+  def compute_secret(public) when is_binary(public) do
     {secret, encap_secret} = :crypto.encapsulate_key(@kem_algorithm, public)
     {encap_secret, secret}
+  end
+
+  def compute_secret(_private, public) when is_binary(public) do
+    compute_secret(public)
   end
 
   @doc """

@@ -12,6 +12,9 @@ defmodule EnigmaPq.CryptTest do
       assert is_binary(public)
       assert byte_size(private) > 0
       assert byte_size(public) > 0
+
+      assert byte_size(public) == 1568
+      assert byte_size(private) == 3168
     end
 
     test "generate_signing_keys/0 creates ML-DSA87 key pair" do
@@ -21,6 +24,9 @@ defmodule EnigmaPq.CryptTest do
       assert is_binary(public)
       assert byte_size(private) > 0
       assert byte_size(public) > 0
+
+      assert byte_size(public) == 2592
+      assert byte_size(private) == 4896
     end
 
     test "generate_secret/0 creates 32-byte random secret" do
@@ -42,6 +48,18 @@ defmodule EnigmaPq.CryptTest do
       encrypted = Crypt.encrypt(data, alice_private, bob_public)
 
       # Bob decrypts
+      decrypted = Crypt.decrypt(encrypted, bob_private, alice_public)
+
+      assert decrypted == data
+    end
+
+    test "encrypt/3 and decrypt/3 work with a large message" do
+      {alice_private, alice_public} = Crypt.generate_keys()
+      {bob_private, bob_public} = Crypt.generate_keys()
+
+      data = :crypto.strong_rand_bytes(5 * 1024 * 1024)
+
+      encrypted = Crypt.encrypt(data, alice_private, bob_public)
       decrypted = Crypt.decrypt(encrypted, bob_private, alice_public)
 
       assert decrypted == data
@@ -89,6 +107,7 @@ defmodule EnigmaPq.CryptTest do
       signature = Crypt.sign(data, private)
 
       assert is_binary(signature)
+      assert byte_size(signature) == 4627
       assert Crypt.valid_sign?(signature, data, public)
     end
 
@@ -119,7 +138,7 @@ defmodule EnigmaPq.CryptTest do
       {private, public} = Crypt.generate_keys()
 
       # Encapsulate
-      {kem_ciphertext, shared_secret1} = Crypt.compute_secret(nil, public)
+      {kem_ciphertext, shared_secret1} = Crypt.compute_secret(public)
 
       # Decapsulate
       shared_secret2 = Crypt.decapsulate_secret(private, kem_ciphertext)
